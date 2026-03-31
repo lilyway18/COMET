@@ -45,3 +45,42 @@ git clone https://github.com/yourname/COMET.git
 cd COMET
 
 pip install -r requirements.txt
+
+🧩 Method Pipeline
+
+COMET consists of three stages:
+
+1. Representation Learning
+
+An encoder maps single-cell data into a latent space.
+
+2. Class-consistent Quantization
+
+Constructs structured codebooks for each class and discretizes latent representations.
+
+3. Metacell Construction
+
+Aggregates purified representations into prototypes for classification.
+
+📊 Expected Results
+
+COMET achieves:
+
+higher Accuracy (ACC)
+improved Macro-F1
+better clustering consistency
+
+Especially in:
+
+few-shot settings
+rare cell-type recognition
+
+🔗 Code Availability
+
+Code will be released upon acceptance.
+
+📬 Contact
+
+For questions:
+
+Email: woshili18wei@163.com
