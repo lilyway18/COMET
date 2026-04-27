@@ -13,7 +13,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset, random_split
 import torch.nn.functional as F
 
-# 读 h5ad
+# read h5ad
 import scanpy as sc
 from scipy.sparse import issparse
 import pandas as pd
@@ -86,7 +86,7 @@ def load_user_data_new() -> Tuple[np.ndarray, np.ndarray, Dict[int, str]]:
 
 def load_user_data() -> Tuple[np.ndarray, np.ndarray, Dict[int, str]]:
     """
-    read another h5ad，并返回：
+    read another h5ad and return：
         X_all: (N_cells, N_genes) float32
         y_all: (N_cells,) int64, 0~C-1
         class_names: {int -> str}
@@ -176,7 +176,7 @@ def build_metacell_latent(metacell_ids, Z_all, y_all, model):
         meta_shallow[m] = Z_all[mask, :shallow_dim].mean(axis=0)
 
     # --------------------------------------------------------
-    # 4) 提取 codebook weight 作为 deep variable (K, deep_dim)
+    # 4) get codebook weight as deep variable (K, deep_dim)
     # --------------------------------------------------------
     meta_deep_list = []
     for cb in model.codebooks:
@@ -184,11 +184,11 @@ def build_metacell_latent(metacell_ids, Z_all, y_all, model):
     meta_deep = np.concatenate(meta_deep_list, axis=0)  # (K, deep_dim)
 
     # --------------------------------------------------------
-    # 5) 拼接 shallow + deep = meta latent
+    # 5) concate shallow + deep = meta latent
     # --------------------------------------------------------
     meta_latent = np.concatenate([meta_shallow, meta_deep], axis=1)
 
-    # --- 移除 label = -1 的元细胞 ---
+    # --- remove the metacells whose label = -1  ---
     valid_mask = (meta_labels != -1)
     meta_labels = meta_labels[valid_mask]
     meta_latent = meta_latent[valid_mask]
@@ -204,11 +204,9 @@ def build_metacell_latent(metacell_ids, Z_all, y_all, model):
 class ClassConditionalVQVAE(nn.Module):
     """
     VQ-VAE：
-        - encoder: x -> z_e  (连续 latent)
-        - 对每个类 c，用独立 codebook_c 做量化 -> z_q
+        - encoder: x -> z_e  
+        - to each class c，use independenr codebook_c to quantize -> z_q
         - decoder: z_q -> x_rec
-
-    这里 classes = 11，每个类一套 codebook，相当于每类自己的“元细胞集合”。
     """
 
     def __init__(
@@ -246,19 +244,18 @@ class ClassConditionalVQVAE(nn.Module):
         dec_layers.append(nn.Linear(last_dim, input_dim))
         self.decoder = nn.Sequential(*dec_layers)
 
-        # 每类一个 codebook，用 nn.Embedding 存参数
         self.codebooks = nn.ModuleList()
         for k in codebook_sizes:
             emb = nn.Embedding(k, latent_dim)
-            # 简单初始化
+            # init
             nn.init.uniform_(emb.weight, -1.0 / k, 1.0 / k)
             self.codebooks.append(emb)
 
-        # 记录每类 code 的偏移量（方便算全局 metacell id）
+        # get offset of code （to calculate metacell id）
         offsets = [0]
         for k in codebook_sizes[:-1]:
             offsets.append(offsets[-1] + k)
-        # buffer，会随模型一起保存/移动设备
+        # buffer
         self.register_buffer("codebook_offsets", torch.tensor(offsets, dtype=torch.long))
 
     def _quantize_per_class(
@@ -267,11 +264,11 @@ class ClassConditionalVQVAE(nn.Module):
         y: torch.Tensor       # (B,)
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        对 batch 内每个样本按照自己的类，用对应 codebook 量化：
-            返回:
+         quantize：
+            return:
                 z_q: (B, latent_dim)
-                code_idx_local: (B,) 每个样本在自己类的 codebook 下的 index
-                usage_loss: 标量，鼓励每个 code 使用更均匀
+                code_idx_local: (B,) the index of codebook
+                usage_loss: 
         """
         device = z_e.device
         B, D = z_e.shape
@@ -287,7 +284,7 @@ class ClassConditionalVQVAE(nn.Module):
 
             z_c = z_e[mask]                          # (Nc, D)
             emb_c = self.codebooks[c].weight         # (Kc, D)
-            # (Nc, Kc) 距离
+            # (Nc, Kc) distance
             # ||z-e||^2 = ||z||^2 + ||e||^2 - 2 z e^T
             z_norm2 = (z_c ** 2).sum(dim=1, keepdim=True)          # (Nc, 1)
             e_norm2 = (emb_c ** 2).sum(dim=1).unsqueeze(0)         # (1, Kc)
@@ -299,7 +296,7 @@ class ClassConditionalVQVAE(nn.Module):
             z_q[mask] = z_q_c
             code_idx_local[mask] = idx
 
-            # usage 正则：鼓励 code 使用均匀 -> p*log(p*K)
+            # usage -> p*log(p*K)
             counts = torch.bincount(idx, minlength=self.codebook_sizes[c]).float()
             probs = counts / (counts.sum() + 1e-8)
             valid = probs > 0
@@ -320,16 +317,16 @@ class ClassConditionalVQVAE(nn.Module):
         y: torch.Tensor    # (B,)
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        返回:
+        return:
             x_rec: (B, input_dim)
-            vq_loss: 标量
-            usage_loss: 标量
+            vq_loss: 
+            usage_loss: 
             code_idx_local: (B,)
         """
         z_e = self.encoder(x)                       # (B, latent_dim)
         z_q, code_idx_local, usage_loss = self._quantize_per_class(z_e, y)
 
-        # 标准 VQ-VAE 损失
+        #  VQ-VAE loss 
         vq_loss_1 = F.mse_loss(z_q.detach(), z_e)
         vq_loss_2 = F.mse_loss(z_q, z_e.detach())
         vq_loss = vq_loss_1 + self.beta * vq_loss_2
@@ -348,14 +345,14 @@ class ClassConditionalVQVAE(nn.Module):
         y: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        只做 encoder + quantize，不 decode：
-            返回:
+         encoder + quantize
+            return:
                 z_q: (B, latent_dim)
                 code_idx_local: (B,)
         """
         z_e = self.encoder(x)
         z_q, code_idx_local, _ = self._quantize_per_class(z_e, y)
-        # 用 straight-through 一致的表示
+
         z_st = z_e + (z_q - z_e).detach()
         return z_st, code_idx_local
 
@@ -371,10 +368,10 @@ class VQVAETrainingConfig:
     val_split: float = 0.1
     early_stop_patience: int = 25
     beta: float = 0.25
-    usage_reg_weight: float = 1e-3   # usage 正则的系数
+    usage_reg_weight: float = 1e-3   # usage
     device: str = DEFAULT_DEVICE
 
-    # codebook 大小控制：每个 code 约 ≈ target_cells_per_code 个细胞
+    # Codebook size control: Each code is approximately ≈ target_cells_per_code cells.
     target_cells_per_code: int = 15
     min_codes_per_class: int = 8
     max_codes_per_class: int = 256
@@ -385,20 +382,20 @@ def auto_codebook_sizes_per_class(
     n_classes: int,
     cfg: VQVAETrainingConfig
 ) -> List[int]:
-    """根据每个类的细胞数量自动估计各类 codebook 大小。"""
+
     counts = np.bincount(y_all, minlength=n_classes)
     sizes = []
-    print("[VQVAE] 每个类的细胞数:")
+    print("[VQVAE] Number of cells per class:")
     for c in range(n_classes):
         print(f"  class {c}: N={counts[c]}")
         k = int(round(counts[c] / cfg.target_cells_per_code))
         k = max(cfg.min_codes_per_class, min(cfg.max_codes_per_class, k))
         sizes.append(k)
 
-    print("[VQVAE] 自动设置每类 codebook 大小:")
+    print("[VQVAE] Automatically set the size of each codebook type:")
     for c, k in enumerate(sizes):
         print(f"  class {c}: codebook_size={k}")
-    print(f"[VQVAE] 总 code数量 = {sum(sizes)}")
+    print(f"[VQVAE] all code’s num = {sum(sizes)}")
     return sizes
 
 
