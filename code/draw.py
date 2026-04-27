@@ -12,10 +12,10 @@ matplotlib.rcParams['font.family'] = 'Times New Roman'
 
 
 def plot_cells_and_metacells_tsne(
-        Z_sub_raw,        # 原细胞 latent，用于可视化
+        Z_sub_raw,        # latent
         y_sub,
-        sup_head_cells,   # 细胞分类头
-        sup_head_meta,    # 元细胞分类头
+        sup_head_cells,   # head of origin cell
+        sup_head_meta,    # head of metacell
         modality_name,
         metacell_ids,
         metacell_centroids,
@@ -29,7 +29,7 @@ def plot_cells_and_metacells_tsne(
     device = next(sup_head_cells.parameters()).device
 
     # --------------------------------------------------------
-    # 1) Label 体系
+    # 1) Label 
     # --------------------------------------------------------
     labels_sorted = np.unique(y_sub)
     num_labels = len(labels_sorted)
@@ -39,12 +39,12 @@ def plot_cells_and_metacells_tsne(
     else:
         assert len(class_names) == num_labels
 
-    # label 映射到连续颜色索引
+    # label to color index
     label2cidx = {l: i for i, l in enumerate(labels_sorted)}
     y_sub_color = np.array([label2cidx[l] for l in y_sub])
 
     # --------------------------------------------------------
-    # 2) 单细胞预测
+    # 2) predict the cell
     # --------------------------------------------------------
     Z_cells_tensor = torch.tensor(Z_sub_raw, dtype=torch.float32, device=device)
     y_pred_cells = sup_head_cells(Z_cells_tensor).argmax(dim=1).cpu().numpy()
@@ -54,9 +54,9 @@ def plot_cells_and_metacells_tsne(
     y_pred_cells_color = np.array([label2cidx[l] for l in y_pred_cells])
 
     # --------------------------------------------------------
-    # 2.5) 单细胞：指定类别的 per-class accuracy
+    # 2.5) cells' per-class accuracy
     # --------------------------------------------------------
-    # 与元细胞逻辑完全一致
+    # same as metacell
     # target_cell_classes = [6, 20, 8, 9, 10, 12, 13, 21, 17]  # BMMC
     target_cell_classes = [10, 11, 13, 14]  # isseq
 
@@ -84,7 +84,7 @@ def plot_cells_and_metacells_tsne(
 
 
     # --------------------------------------------------------
-    # 3) 元细胞标签（多数投票）
+    # 3) construct metacell label
     # --------------------------------------------------------
     num_meta = metacell_centroids.shape[0]
     y_meta = np.zeros(num_meta, dtype=y_sub.dtype)
@@ -98,7 +98,7 @@ def plot_cells_and_metacells_tsne(
     y_meta_color = np.array([label2cidx[l] for l in y_meta])
 
     # --------------------------------------------------------
-    # 4) 元细胞预测
+    # 4) predict metacell
     # --------------------------------------------------------
     Z_meta_tensor = torch.tensor(metacell_centroids, dtype=torch.float32, device=device)
     y_pred_meta = sup_head_meta(Z_meta_tensor).argmax(dim=1).cpu().numpy()
@@ -130,7 +130,7 @@ def plot_cells_and_metacells_tsne(
             per_class_acc_meta[c] = acc_c
 
     # --------------------------------------------------------
-    # 5) 单细胞 t-SNE
+    # 5) cells’ tsne
     # --------------------------------------------------------
     pca_cells = PCA(n_components=min(pca_dim, Z_sub_raw.shape[1])).fit_transform(Z_sub_raw)
     tsne_cells = TSNE(
@@ -142,7 +142,7 @@ def plot_cells_and_metacells_tsne(
     ).fit_transform(pca_cells)
 
     # --------------------------------------------------------
-    # 6) 元细胞 t-SNE
+    # 6) metacells’ tsne
     # --------------------------------------------------------
     pca_meta = PCA(n_components=min(pca_dim, metacell_centroids.shape[1])).fit_transform(metacell_centroids)
     tsne_meta = TSNE(
@@ -164,7 +164,7 @@ def plot_cells_and_metacells_tsne(
     cmap = ListedColormap(cmap_base)
 
     # --------------------------------------------------------
-    # 8) 绘图（整合版，一维 axes）
+    # 8) draw image
     # --------------------------------------------------------
     fig, axes = plt.subplots(1, 4, figsize=(36, 10))  # 1行4列，直接返回一维 axes
     fig.subplots_adjust(bottom=0.22)  # 底部留空间给 legend
@@ -188,27 +188,26 @@ def plot_cells_and_metacells_tsne(
 
     axes_fontsize = 25
 
-    # --- 单细胞真值 ---
+    # --- cells truth ---
     axes[0].scatter(tsne_cells[:, 0], tsne_cells[:, 1], c=y_sub_color, s=8, cmap=cmap)
     axes[0].set_title(f"Cells True Labels\nAcc={acc_cells * 100:.2f}%, F1={f1_cells * 100:.2f}%",
                       fontsize=axes_fontsize)
 
-    # --- 单细胞预测 ---
+    # --- predication of cells ---
     axes[1].scatter(tsne_cells[:, 0], tsne_cells[:, 1], c=y_pred_cells_color, s=8, cmap=cmap)
     axes[1].set_title(f"Cells Predicted Labels\nAcc={acc_cells * 100:.2f}%, F1={f1_cells * 100:.2f}%",
                       fontsize=axes_fontsize)
 
-    # --- 元细胞真值 ---
+    # --- metacells truth ---
     axes[2].scatter(tsne_meta[:, 0], tsne_meta[:, 1], c=y_meta_color, edgecolors="black", s=40, cmap=cmap)
     axes[2].set_title(f"MetaCells True Labels\nAcc={acc_meta * 100:.2f}%, F1={f1_meta * 100:.2f}%",
                       fontsize=axes_fontsize)
 
-    # --- 元细胞预测 ---
+    # --- prediction of cells ---
     axes[3].scatter(tsne_meta[:, 0], tsne_meta[:, 1], c=y_pred_meta_color, edgecolors="black", s=40, cmap=cmap)
     axes[3].set_title(f"MetaCells Predicted Labels\nAcc={acc_meta * 100:.2f}%, F1={f1_meta * 100:.2f}%",
                       fontsize=axes_fontsize)
 
-    # ---- 不显示刻度 ----
     for ax in axes:
         ax.set_aspect('equal', 'box')
         ax.set_xticks([])
@@ -245,10 +244,10 @@ def plot_cells_and_metacells_tsne(
 
 
 def plot_metacells_tsne_only(
-        Z_sub_raw,        # 仍保留接口一致性（未使用）
+        Z_sub_raw,        # unused
         y_sub,
-        sup_head_cells,   # 保留接口一致性（未使用）
-        sup_head_meta,    # 元细胞分类头
+        sup_head_cells,   # unused
+        sup_head_meta,   
         modality_name,
         metacell_ids,
         metacell_centroids,
@@ -260,7 +259,7 @@ def plot_metacells_tsne_only(
     device = next(sup_head_meta.parameters()).device
 
     # --------------------------------------------------------
-    # 1) Label 体系
+    # 1) Label 
     # --------------------------------------------------------
     labels_sorted = np.unique(y_sub)
     num_labels = len(labels_sorted)
@@ -273,7 +272,7 @@ def plot_metacells_tsne_only(
     label2cidx = {l: i for i, l in enumerate(labels_sorted)}
 
     # --------------------------------------------------------
-    # 2) 元细胞标签（多数投票）
+    # 2) label of metacell
     # --------------------------------------------------------
     num_meta = metacell_centroids.shape[0]
     y_meta = np.zeros(num_meta, dtype=y_sub.dtype)
@@ -288,7 +287,7 @@ def plot_metacells_tsne_only(
     y_meta_color = np.array([label2cidx[l] for l in y_meta])
 
     # --------------------------------------------------------
-    # 3) 元细胞预测
+    # 3) predict metacells
     # --------------------------------------------------------
     Z_meta_tensor = torch.tensor(
         metacell_centroids,
@@ -308,7 +307,7 @@ def plot_metacells_tsne_only(
     y_pred_meta_color = np.array([label2cidx[l] for l in y_pred_meta])
 
     # --------------------------------------------------------
-    # 4) 元细胞 t-SNE
+    # 4) metacells tsne
     # --------------------------------------------------------
     pca_meta = PCA(
         n_components=min(pca_dim, metacell_centroids.shape[1])
@@ -327,7 +326,7 @@ def plot_metacells_tsne_only(
     # tsne_meta = tsne_meta * scale
 
     # --------------------------------------------------------
-    # 5) Color map（与原逻辑一致）
+    # 5) Color map
     # --------------------------------------------------------
     from matplotlib.colors import ListedColormap
 
@@ -349,20 +348,20 @@ def plot_metacells_tsne_only(
     cmap = ListedColormap(cmap_arr)
 
     # --------------------------------------------------------
-    # 6) 绘图（1行2列）
+    # 6) draw image
     # --------------------------------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(18, 12))
     fig.subplots_adjust(bottom=0.25)
     fig.suptitle(
         f"{modality_name} Minimum metacell size={k_means_k}",
         fontsize=28,
-        fontweight='bold',  # 加粗
+        fontweight='bold',  # bold
         y=1.05
     )
 
     axes_fontsize = 24
 
-    # --- 元细胞真值 ---
+    # --- metacells truth ---
     axes[0].scatter(
         tsne_meta[:, 0],
         tsne_meta[:, 1],
@@ -376,7 +375,7 @@ def plot_metacells_tsne_only(
         fontsize=axes_fontsize
     )
 
-    # --- 元细胞预测 ---
+    # --- metacells prediction ---
     axes[1].scatter(
         tsne_meta[:, 0],
         tsne_meta[:, 1],
@@ -396,7 +395,7 @@ def plot_metacells_tsne_only(
         ax.set_yticks([])
 
     # --------------------------------------------------------
-    # 7) Legend（完全一致）
+    # 7) Legend
     # --------------------------------------------------------
     from matplotlib.lines import Line2D
 
